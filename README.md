@@ -54,7 +54,7 @@ From a Google Street View photo with trees blocking the building:
 ## Requirements
 
 - Python 3.12+
-- [Google Gemini API key](https://ai.google.dev/) (uses `gemini-2.5-flash-image` model)
+- [Google Gemini API key](https://ai.google.dev/) (uses `gemini-3.1-flash-image-preview` model)
 - ~$0.12 per image (3 Gemini API calls)
 
 ## Tech Stack

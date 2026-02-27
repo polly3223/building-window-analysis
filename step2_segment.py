@@ -20,7 +20,7 @@ def gemini_segment(client, image: Image.Image, prompt: str, output_path: str) ->
     """Ask Gemini to produce a segmentation overlay."""
     print(f"  Sending segmentation request...")
     response = client.models.generate_content(
-        model="gemini-2.5-flash-image",
+        model="gemini-3.1-flash-image-preview",
         contents=[prompt, image],
         config=types.GenerateContentConfig(
             response_modalities=["TEXT", "IMAGE"],
