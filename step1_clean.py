@@ -10,7 +10,10 @@ from PIL import Image
 from google import genai
 from google.genai import types
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "REDACTED")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+if not GEMINI_API_KEY:
+    print("ERROR: Set GEMINI_API_KEY environment variable")
+    sys.exit(1)
 
 def clean_building(input_path: str, output_path: str) -> str:
     """Send image to Gemini with a cleanup prompt, save the result."""

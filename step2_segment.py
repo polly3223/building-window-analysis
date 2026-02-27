@@ -13,7 +13,10 @@ import numpy as np
 from google import genai
 from google.genai import types
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "REDACTED")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+if not GEMINI_API_KEY:
+    print("ERROR: Set GEMINI_API_KEY environment variable")
+    sys.exit(1)
 
 
 def gemini_segment(client, image: Image.Image, prompt: str, output_path: str) -> Image.Image:
