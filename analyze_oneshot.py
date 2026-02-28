@@ -1,11 +1,7 @@
 """
 One-shot building window analysis for energy efficiency.
-Two Gemini calls:
-  1. Remove trees/cars from the photo (keep everything else identical)
-  2. Generate window (red) + wall (blue) mask on the cleaned photo
-     - Only the center building slice
-     - Windows marked at FULL size even if balconies partially block them
-Then pixel-count for the ratio.
+Single Gemini call: raw Google Maps photo → segmentation mask.
+Then pixel-count for window/wall ratio.
 """
 import os
 import sys
@@ -22,62 +18,29 @@ if not GEMINI_API_KEY:
     sys.exit(1)
 
 
-def gemini_image(client, prompt: str, image: Image.Image, label: str) -> Image.Image:
-    """Send image + prompt to Gemini, return the generated image."""
-    print(f"  [{label}] Sending to Gemini...")
-    response = client.models.generate_content(
-        model="gemini-3.1-flash-image-preview",
-        contents=[prompt, image],
-        config=types.GenerateContentConfig(
-            response_modalities=["TEXT", "IMAGE"],
-        ),
-    )
-    for part in response.candidates[0].content.parts:
-        if part.text is not None:
-            print(f"  [{label}] Gemini: {part.text[:200]}")
-        elif part.inline_data is not None:
-            result = Image.open(BytesIO(part.inline_data.data))
-            print(f"  [{label}] Got image: {result.size[0]}x{result.size[1]}")
-            return result
-    print(f"  [{label}] ERROR: No image returned")
-    sys.exit(1)
-
-
 def analyze_building(input_path: str, output_dir: str = ".") -> dict:
-    """Clean photo, generate mask, calculate window ratio."""
+    """Single Gemini call → mask → pixel math."""
     client = genai.Client(api_key=GEMINI_API_KEY)
     input_image = Image.open(input_path)
     w, h = input_image.size
     print(f"Input: {w}x{h}")
 
-    # ── Step 1: Remove trees and cars ─────────────────────────
-    print("\n[Step 1] Removing obstructions...")
-    clean_prompt = """Remove the trees and cars from this photo. Replace them with the building facade that is behind them.
+    # ── Single Gemini call: generate mask ─────────────────────
+    print("\nGenerating segmentation mask...")
+    prompt = """This is a Google Maps street view photo. There are buildings visible, possibly partially hidden by trees, cars, or other obstructions. There is a building facade in the CENTER of the image — this is the one I want analyzed.
 
-CRITICAL CONSTRAINTS:
-- The building must stay the EXACT SAME SIZE and shape as in the original photo
-- Do NOT make the building wider or taller — it should occupy the same area of the image
-- Do NOT change the perspective or camera angle
-- Keep the same framing and composition — same sky, same ground area
-- Where a tree was, show the building wall/windows that were hidden behind it, matching the style of the visible parts
-- The black triangular areas are panoramic stitch artifacts — replace them with sky
-- Do NOT crop, do NOT zoom in, do NOT reframe
-- The output image should be the same scene, same size, just without the trees and cars"""
+WHICH BUILDING: ONLY the facade visible in the center of the photo. If there are buildings on the left and right edges, IGNORE them completely — paint them black. Only analyze the center building that the camera is pointing at.
 
-    cleaned = gemini_image(client, clean_prompt, input_image, "CLEAN")
-    cleaned_path = os.path.join(output_dir, "cleaned_oneshot.png")
-    cleaned.save(cleaned_path)
-
-    # ── Step 2: Generate mask on cleaned image ────────────────
-    print("\n[Step 2] Generating segmentation mask...")
-    mask_prompt = """This photo shows a street scene from Google Maps. There are buildings on the LEFT side and RIGHT side of the image, and in between them (in the CENTER/BACKGROUND) there is a NARROW building facade facing the camera — this is the building I want you to analyze.
-
-WHICH BUILDING: ONLY the narrow facade visible in the center gap between the other two buildings. It is the building you would walk toward if you walked straight ahead down the street. Do NOT include the wide building on the left. Do NOT include the building on the right.
-
-Create a segmentation mask for energy efficiency:
+Create a segmentation mask for energy efficiency analysis:
 - That center building's WINDOWS → SOLID RED (#FF0000)
-- That center building's OPAQUE WALL (brick, concrete, plaster) → SOLID BLUE (#0000FF)
+- That center building's OPAQUE WALL (vertical facade surface: brick, concrete, plaster) → SOLID BLUE (#0000FF)
 - EVERYTHING ELSE → SOLID BLACK (#000000)
+
+CRITICAL — LOOK THROUGH OBSTRUCTIONS:
+- Trees, cars, and street furniture may be blocking parts of the building
+- You must ESTIMATE the full facade behind these obstructions
+- If you can see windows on visible parts of the building, infer that the pattern continues behind the trees
+- Mark the estimated windows and wall behind obstructions as if the obstructions were transparent
 
 CRITICAL — FULL WINDOW SIZE BEHIND BALCONIES:
 - Balcony slabs from upper floors often hide the top part of windows on the floor below (due to perspective from street level)
@@ -85,17 +48,37 @@ CRITICAL — FULL WINDOW SIZE BEHIND BALCONIES:
 - Imagine the balconies are transparent: draw the complete window shape
 - The balcony slabs and railings themselves are BLACK (not wall, not window)
 
-ALSO BLACK:
-- The left building (entire thing — walls, windows, balconies)
-- The right building (entire thing)
-- Sky, ground, sidewalk, cars, trees
+ALSO BLACK (not part of facade):
+- Buildings on the left and right edges of the photo
+- Sky, ground, sidewalk, street
+- Trees, cars, people, street furniture
+- Balcony slabs (horizontal protruding concrete) and railings
 - Black triangular panoramic stitch artifacts
 
-Output: flat color mask — solid red, blue, black only. Same dimensions as input."""
+Output: flat color mask — solid red, blue, black only. No photo, no textures. Same dimensions as input."""
 
-    mask = gemini_image(client, mask_prompt, cleaned, "MASK")
-    mask_path = os.path.join(output_dir, "mask_oneshot.png")
-    mask.save(mask_path)
+    print("  Sending to Gemini...")
+    response = client.models.generate_content(
+        model="gemini-3.1-flash-image-preview",
+        contents=[prompt, input_image],
+        config=types.GenerateContentConfig(
+            response_modalities=["TEXT", "IMAGE"],
+        ),
+    )
+
+    mask = None
+    for part in response.candidates[0].content.parts:
+        if part.text is not None:
+            print(f"  Gemini: {part.text[:200]}")
+        elif part.inline_data is not None:
+            mask = Image.open(BytesIO(part.inline_data.data))
+            mask_path = os.path.join(output_dir, "mask_oneshot.png")
+            mask.save(mask_path)
+            print(f"  Mask saved: {mask_path} ({mask.size[0]}x{mask.size[1]})")
+
+    if mask is None:
+        print("ERROR: Gemini did not return an image")
+        sys.exit(1)
 
     # ── Pixel counting ───────────────────────────────────────
     arr = np.array(mask.convert("RGB")).astype(int)
@@ -139,7 +122,6 @@ Output: flat color mask — solid red, blue, black only. Same dimensions as inpu
         print("  ERROR: No facade detected")
 
     # ── Visualization ────────────────────────────────────────
-    # Overlay on original photo so user sees the mask on what they provided
     orig = np.array(input_image.convert("RGB")).copy()
 
     # Resize mask to match original if Gemini changed dimensions
@@ -168,7 +150,6 @@ Output: flat color mask — solid red, blue, black only. Same dimensions as inpu
     vis = Image.fromarray(orig)
     draw = ImageDraw.Draw(vis)
 
-    # Label
     label = f"Windows: {w_ratio:.1%} | Wall: {1-w_ratio:.1%}"
     draw.rectangle([5, 5, 350, 35], fill=(0, 0, 0))
     draw.text((10, 10), label, fill=(255, 255, 255))
