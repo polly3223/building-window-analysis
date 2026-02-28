@@ -1,13 +1,49 @@
 # Building Window Analysis
 
-Calculate the window-to-facade area ratio of buildings from street-level photos — even with bad perspective, trees, and obstructions.
+Estimate the window-to-wall ratio of building facades from Google Maps street view photos — for energy efficiency analysis.
 
-## How it works
+Works even with bad perspectives, trees, and cars blocking the view.
 
-1. **Gemini 2.5 Flash Image** cleans the photo: removes trees, cars, fixes perspective distortion → clean front-facing facade
-2. **Gemini** generates a **windows mask** (red overlay on detected windows)
-3. **Gemini** generates a **facade mask** (blue mask of the full building)
-4. **Pixel counting** calculates the window/facade area ratio
+## Pipeline
+
+3 Gemini API calls, each independently testable:
+
+| Step | What it does | Output |
+|------|-------------|--------|
+| **Step 1** — Clean | Remove trees, cars, obstructions | Clean photo of the buildings |
+| **Step 2** — Select | Darken everything except the target building | Isolated building at full brightness |
+| **Step 3** — Mask | Generate window (red) + wall (blue) segmentation mask | Flat color mask for pixel counting |
+
+Then **pixel math** counts red vs blue pixels → window/wall ratio.
+
+## Example
+
+### Input
+Google Maps street view — bad panoramic stitch, huge tree blocking the center building:
+
+![Input](examples/0_input.jpg)
+
+### Step 1 — Remove obstructions
+Trees and cars removed, buildings revealed:
+
+![Step 1](examples/1_cleaned.png)
+
+### Step 2 — Select center building
+Everything dimmed except the target building:
+
+![Step 2](examples/2_selected.png)
+
+### Step 3 — Segmentation mask
+Red = windows, Blue = opaque wall, Black = everything else:
+
+![Step 3](examples/3_mask.png)
+
+### Result
+Overlay visualization with final ratio:
+
+![Result](examples/4_result.png)
+
+**Windows: 12.4% | Wall: 87.6%**
 
 ## Setup
 
@@ -25,41 +61,31 @@ export GEMINI_API_KEY="your-key-here"
 ## Usage
 
 ```bash
-# Full pipeline (clean → segment → calculate)
-uv run python analyze.py photo.jpg output/
+# Full pipeline (clean → select → mask → result)
+uv run run_pipeline.py photo.jpg [output_dir]
 
-# Or run steps individually:
-uv run python step1_clean.py photo.jpg cleaned.png
-uv run python step2_segment.py cleaned.png output/
-uv run python step3_calculate.py cleaned.png mask_windows.png mask_facade.png output/
+# Or run steps individually for testing:
+uv run step1_clean.py input.jpg step1_output.png
+uv run step2_select.py step1_output.png step2_output.png
+uv run step3_mask.py step2_output.png step3_mask.png
 ```
 
-## Output
+## Output files
 
-- `cleaned.png` — cleaned building facade (perspective-corrected, obstructions removed)
-- `mask_windows.png` — windows detection mask
-- `mask_facade.png` — facade detection mask
-- `result.png` — visualization with ratio overlay
-
-## Example Result
-
-From a Google Street View photo with trees blocking the building:
-
-| Step | Output |
-|------|--------|
-| Input | Bad perspective, trees covering facade |
-| Cleaned | Clean front-facing facade |
-| Result | **Windows ≈ 15% of facade, Wall ≈ 85%** |
+- `step1_output.png` — cleaned photo (obstructions removed)
+- `step2_output.png` — center building isolated (rest dimmed)
+- `step3_mask.png` — segmentation mask (red=windows, blue=wall)
+- `result.png` — visualization overlay with ratio
 
 ## Requirements
 
 - Python 3.12+
-- [Google Gemini API key](https://ai.google.dev/) (uses `gemini-3.1-flash-image-preview` model)
-- ~$0.12 per image (3 Gemini API calls)
+- [Google Gemini API key](https://ai.google.dev/) (uses `gemini-3.1-flash-image-preview`)
+- ~$0.01 per image (3 Gemini Flash API calls)
 
 ## Tech Stack
 
-- **Gemini 2.5 Flash Image** (Nano Banana) — image editing + mask generation
-- **Pillow** — image processing
+- **Gemini 3.1 Flash Image Preview** — image editing + mask generation
+- **Pillow** — image I/O
 - **NumPy** — pixel counting
 - **uv** — Python package management
