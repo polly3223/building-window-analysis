@@ -17,5 +17,6 @@ wheels/
 # UV lock
 uv.lock
 
-# Keep input example
-!example/
+# Keep example pipeline images
+!examples/
+!examples/*
