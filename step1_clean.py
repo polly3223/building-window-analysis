@@ -1,6 +1,7 @@
 """
-Step 1: Use Gemini 2.5 Flash Image (Nano Banana) to clean building photos.
-Removes trees, cars, and obstructions. Fixes perspective to get a clean facade view.
+Step 1: Use Gemini Flash Image to clean building photos.
+Removes trees, cars, and obstructions to reveal the existing facade.
+Does NOT invent or reconstruct — only removes what's in front of the building.
 """
 import os
 import sys
@@ -22,24 +23,19 @@ def clean_building(input_path: str, output_path: str) -> str:
     input_image = Image.open(input_path)
     print(f"Input image: {input_image.size[0]}x{input_image.size[1]}")
 
-    prompt = """You are an architectural photo editor. Take this building photograph and create a clean,
-front-facing view of JUST the main building facade (the left building - the multi-story residential building).
+    prompt = """Remove the trees and cars from this photo. Replace them with the building facade that is behind them.
 
-Remove ALL obstructions:
-- Remove all trees and vegetation covering the building
-- Remove all cars and vehicles
-- Remove the street/sidewalk
-- Remove the black triangular borders (this is a bad panoramic stitch)
-- Remove the other buildings on the right
+CRITICAL CONSTRAINTS:
+- The building must stay the EXACT SAME SIZE and shape as in the original photo
+- Do NOT make the building wider or taller — it should occupy the same area of the image
+- Do NOT change the perspective or camera angle
+- Keep the same framing and composition — same sky, same ground area
+- Where a tree was, show the building wall/windows that were hidden behind it, matching the style of the visible parts
+- The black triangular areas are panoramic stitch artifacts — replace them with sky
+- Do NOT crop, do NOT zoom in, do NOT reframe
+- The output image should be the same scene, same size, just without the trees and cars"""
 
-Reconstruct the building facade as if photographed straight-on with no perspective distortion.
-Show the full facade from ground level to roof. Fill in any parts hidden by trees by inferring
-the building's architectural pattern (it has a repeating grid of windows and balconies).
-
-The output should look like a clean architectural elevation drawing / front view of just that one building.
-Keep it photorealistic."""
-
-    print("Sending to Gemini 2.5 Flash Image...")
+    print("Sending to Gemini Flash Image...")
     response = client.models.generate_content(
         model="gemini-3.1-flash-image-preview",
         contents=[prompt, input_image],

@@ -11,23 +11,30 @@ from PIL import Image, ImageDraw, ImageFont
 def calculate_ratio(cleaned_path: str, windows_mask_path: str, facade_mask_path: str, output_dir: str = "."):
     """Calculate window-to-facade ratio from masks."""
 
-    orig = np.array(Image.open(cleaned_path).convert("RGB")).astype(float)
-    windows_img = np.array(Image.open(windows_mask_path).convert("RGB")).astype(float)
+    orig = np.array(Image.open(cleaned_path).convert("RGB"))
+    windows_img = np.array(Image.open(windows_mask_path).convert("RGB")).astype(int)
     facade_img = np.array(Image.open(facade_mask_path).convert("RGB")).astype(int)
 
     # ── Detect window pixels ────────────────────────────────
-    # Gemini overlaid red on the photo — find pixels where red channel increased
-    red_diff = windows_img[:, :, 0] - orig[:, :, 0]
-    window_mask = red_diff > 30  # Red channel increased by 30+
+    # Red-dominant non-black pixels on the windows mask
+    window_mask = (
+        (windows_img[:, :, 0] > 80) &                          # Red channel significant
+        (windows_img[:, :, 0] > windows_img[:, :, 1] + 30) &   # Red > Green
+        (windows_img[:, :, 0] > windows_img[:, :, 2] + 30)     # Red > Blue
+    )
     window_pixels = int(np.sum(window_mask))
 
     # ── Detect facade pixels ────────────────────────────────
-    # Gemini made a blue mask — find blue-dominant non-black pixels
+    # Blue-dominant non-black pixels on the facade mask (Gemini uses various blue shades)
     facade_mask = (
-        (facade_img[:, :, 2] > 80) &       # Blue channel significant
-        (facade_img[:, :, 2] > facade_img[:, :, 0] + 20) &  # Blue > Red
-        (facade_img[:, :, 2] > facade_img[:, :, 1])          # Blue > Green
+        (facade_img[:, :, 2] > 60) &                           # Blue channel significant
+        (facade_img[:, :, 2] > facade_img[:, :, 0] + 15) &     # Blue > Red
+        # Allow cyan/light blue (G can be close to B)
+        ((facade_img[:, :, 2] > facade_img[:, :, 1]) |
+         (facade_img[:, :, 1] > 60))                            # Or green is also bright (cyan)
     )
+    # Exclude any reddish pixels (shouldn't be in facade mask but just in case)
+    facade_mask = facade_mask & ~(windows_img[:, :, 0] > 150)
     facade_pixels = int(np.sum(facade_mask))
 
     total_pixels = orig.shape[0] * orig.shape[1]

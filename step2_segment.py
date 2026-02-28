@@ -58,12 +58,15 @@ def segment_and_calculate(cleaned_path: str, output_dir: str = "."):
 
     # Pass 1: Windows mask
     print("\n[Pass 1] Segmenting WINDOWS...")
-    windows_prompt = """Take this building image and create a MASK overlay:
-- Paint ALL glass windows and glass doors with SOLID BRIGHT RED (#FF0000)
-- Paint everything else (walls, balconies, roof, sky, ground) as SOLID BLACK (#000000)
-- Be thorough - mark EVERY visible window including small ones
-- The output should be a flat color mask, not a photo - just red shapes on black background
-- Same dimensions as the input image"""
+    windows_prompt = """There are multiple buildings in this image. Focus ONLY on the main building in the CENTER/LEFT of the image (the red brick residential building). IGNORE the other building on the right.
+
+Create a MASK image:
+- Paint ALL glass windows and glass doors of ONLY that center/left building with SOLID BRIGHT RED (#FF0000)
+- Paint EVERYTHING else as SOLID BLACK (#000000) — including the other building, sky, ground, walls
+- Be thorough — mark EVERY window on that building, including small ones
+- The output must be a flat color mask: red shapes on a pure black background
+- Same dimensions as the input image
+- Do NOT include any windows from the building on the right"""
 
     windows_img = gemini_segment(
         client, img, windows_prompt,
@@ -72,11 +75,14 @@ def segment_and_calculate(cleaned_path: str, output_dir: str = "."):
 
     # Pass 2: Building facade mask
     print("\n[Pass 2] Segmenting BUILDING FACADE...")
-    facade_prompt = """Take this building image and create a MASK overlay:
-- Paint the ENTIRE building facade (walls, windows, balconies, doors - everything that is part of the building structure from ground to roof) with SOLID BRIGHT BLUE (#0000FF)
-- Paint everything else (sky, ground/sidewalk, any background) as SOLID BLACK (#000000)
-- The output should be a flat color mask - just blue shape on black background
-- Same dimensions as the input image"""
+    facade_prompt = """There are multiple buildings in this image. Focus ONLY on the main building in the CENTER/LEFT of the image (the red brick residential building). IGNORE the other building on the right.
+
+Create a MASK image:
+- Paint the ENTIRE facade of ONLY that center/left building with SOLID BRIGHT BLUE (#0000FF) — include its walls, windows, balconies, doors, roof, everything that is part of that one building from ground to rooftop
+- Paint EVERYTHING else as SOLID BLACK (#000000) — including the other building, sky, ground/sidewalk
+- The output must be a flat color mask: one blue shape on a pure black background
+- Same dimensions as the input image
+- Do NOT include the building on the right"""
 
     facade_img = gemini_segment(
         client, img, facade_prompt,
