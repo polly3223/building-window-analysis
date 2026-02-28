@@ -1,6 +1,6 @@
 """
-Step 1: Remove obstructions (trees, cars, etc.) from a Google Maps street view photo.
-Simple prompt — just remove what blocks the view, slight zoom on buildings.
+Step 2: Isolate the center building by darkening everything else.
+The center building stays at full brightness, untouched.
 """
 import os
 import sys
@@ -15,14 +15,17 @@ if not GEMINI_API_KEY:
     print("ERROR: Set GEMINI_API_KEY environment variable")
     sys.exit(1)
 
-PROMPT = """Remove all trees, cars, people, and any other objects that obstruct the view of the buildings in this photo.
+PROMPT = """Darken everything in this image EXCEPT the narrow building in the CENTER (the red/brown brick one between the two other buildings).
 
-Do NOT change the perspective or camera angle at all.
-If anything, zoom in slightly on the buildings to show them more clearly.
-Fill in the removed areas naturally with what would be behind them."""
+- Make the left building very dark/dimmed
+- Make the right building very dark/dimmed
+- Make the sky very dark
+- Make the ground very dark
+
+The center building should remain at full brightness, completely untouched — keep all its details, balconies, windows exactly as they are. Just dim everything around it so it stands out."""
 
 
-def clean(input_path: str, output_path: str) -> Image.Image:
+def select(input_path: str, output_path: str) -> Image.Image:
     client = genai.Client(api_key=GEMINI_API_KEY)
     img = Image.open(input_path)
     print(f"  Input: {img.size[0]}x{img.size[1]}")
@@ -49,10 +52,10 @@ def clean(input_path: str, output_path: str) -> Image.Image:
 
 
 if __name__ == "__main__":
-    inp = sys.argv[1] if len(sys.argv) > 1 else "input.jpg"
-    out = sys.argv[2] if len(sys.argv) > 2 else "step1_output.png"
+    inp = sys.argv[1] if len(sys.argv) > 1 else "step1_output.png"
+    out = sys.argv[2] if len(sys.argv) > 2 else "step2_output.png"
     if not Path(inp).exists():
         print(f"Error: {inp} not found")
         sys.exit(1)
-    print("[Step 1] Removing obstructions...")
-    clean(inp, out)
+    print("[Step 2] Selecting center building...")
+    select(inp, out)
