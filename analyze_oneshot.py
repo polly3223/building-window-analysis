@@ -1,8 +1,10 @@
 """
 One-shot building window analysis for energy efficiency.
-Two Gemini calls in a single script:
-  1. Clean the Google Maps photo (remove trees/cars, reveal facade)
-  2. Generate combined window (red) + wall (blue) mask — balconies excluded
+Two Gemini calls:
+  1. Remove trees/cars from the photo (keep everything else identical)
+  2. Generate window (red) + wall (blue) mask on the cleaned photo
+     - Only the center building slice
+     - Windows marked at FULL size even if balconies partially block them
 Then pixel-count for the ratio.
 """
 import os
@@ -42,14 +44,14 @@ def gemini_image(client, prompt: str, image: Image.Image, label: str) -> Image.I
 
 
 def analyze_building(input_path: str, output_dir: str = ".") -> dict:
-    """Clean building photo, generate mask, calculate window ratio."""
+    """Clean photo, generate mask, calculate window ratio."""
     client = genai.Client(api_key=GEMINI_API_KEY)
     input_image = Image.open(input_path)
     w, h = input_image.size
     print(f"Input: {w}x{h}")
 
-    # ── Step 1: Clean the photo ──────────────────────────────
-    print("\n[Step 1] Cleaning photo...")
+    # ── Step 1: Remove trees and cars ─────────────────────────
+    print("\n[Step 1] Removing obstructions...")
     clean_prompt = """Remove the trees and cars from this photo. Replace them with the building facade that is behind them.
 
 CRITICAL CONSTRAINTS:
@@ -66,33 +68,34 @@ CRITICAL CONSTRAINTS:
     cleaned_path = os.path.join(output_dir, "cleaned_oneshot.png")
     cleaned.save(cleaned_path)
 
-    # ── Step 2: Generate combined mask ───────────────────────
+    # ── Step 2: Generate mask on cleaned image ────────────────
     print("\n[Step 2] Generating segmentation mask...")
-    mask_prompt = """There are TWO buildings in this image separated by a gap/sky. I need you to analyze ONLY the LEFT building (the red/brown brick one). The RIGHT building must be completely IGNORED — paint it black.
+    mask_prompt = """This photo shows a street scene from Google Maps. There are buildings on the LEFT side and RIGHT side of the image, and in between them (in the CENTER/BACKGROUND) there is a NARROW building facade facing the camera — this is the building I want you to analyze.
 
-Create a segmentation mask for energy efficiency analysis of ONLY the LEFT building:
-- LEFT building WINDOWS (glass surfaces only) → SOLID RED (#FF0000)
-- LEFT building OPAQUE WALL (flat vertical facade surface: brick, concrete, plaster) → SOLID BLUE (#0000FF)
+WHICH BUILDING: ONLY the narrow facade visible in the center gap between the other two buildings. It is the building you would walk toward if you walked straight ahead down the street. Do NOT include the wide building on the left. Do NOT include the building on the right.
+
+Create a segmentation mask for energy efficiency:
+- That center building's WINDOWS → SOLID RED (#FF0000)
+- That center building's OPAQUE WALL (brick, concrete, plaster) → SOLID BLUE (#0000FF)
 - EVERYTHING ELSE → SOLID BLACK (#000000)
 
-What must be BLACK:
-- The entire RIGHT building — all of it, walls and windows
-- Sky, ground, sidewalk, street
-- Balcony slabs (horizontal protruding concrete platforms)
-- Balcony railings, fences, awnings
-- Roof, chimneys, antennas
-- Shopfronts / ground floor commercial (glass storefronts at street level)
+CRITICAL — FULL WINDOW SIZE BEHIND BALCONIES:
+- Balcony slabs from upper floors often hide the top part of windows on the floor below (due to perspective from street level)
+- You MUST mark each window as a FULL RECTANGLE — include the part hidden behind the balcony above
+- Imagine the balconies are transparent: draw the complete window shape
+- The balcony slabs and railings themselves are BLACK (not wall, not window)
 
-Only the FLAT VERTICAL FACADE of the LEFT building counts.
-Output: flat color mask, solid colors on pure black, same dimensions as input."""
+ALSO BLACK:
+- The left building (entire thing — walls, windows, balconies)
+- The right building (entire thing)
+- Sky, ground, sidewalk, cars, trees
+- Black triangular panoramic stitch artifacts
+
+Output: flat color mask — solid red, blue, black only. Same dimensions as input."""
 
     mask = gemini_image(client, mask_prompt, cleaned, "MASK")
     mask_path = os.path.join(output_dir, "mask_oneshot.png")
     mask.save(mask_path)
-
-    if mask is None:
-        print("ERROR: Gemini did not return an image")
-        sys.exit(1)
 
     # ── Pixel counting ───────────────────────────────────────
     arr = np.array(mask.convert("RGB")).astype(int)
@@ -105,7 +108,7 @@ Output: flat color mask, solid colors on pure black, same dimensions as input.""
     )
     window_px = int(np.sum(window_mask))
 
-    # Facade wall: blue-dominant pixels (various blue/cyan shades)
+    # Facade wall: blue-dominant pixels (various blue/cyan shades from Gemini)
     wall_mask = (
         (arr[:, :, 2] > 60) &
         (arr[:, :, 2] > arr[:, :, 0] + 15) &
@@ -136,9 +139,10 @@ Output: flat color mask, solid colors on pure black, same dimensions as input.""
         print("  ERROR: No facade detected")
 
     # ── Visualization ────────────────────────────────────────
-    # Overlay on the cleaned image (not original — trees would hide the overlay)
-    orig = np.array(cleaned.convert("RGB")).copy()
-    # Resize mask to match original if needed
+    # Overlay on original photo so user sees the mask on what they provided
+    orig = np.array(input_image.convert("RGB")).copy()
+
+    # Resize mask to match original if Gemini changed dimensions
     if mask.size != (orig.shape[1], orig.shape[0]):
         mask_resized = mask.resize((orig.shape[1], orig.shape[0]), Image.NEAREST)
         arr_r = np.array(mask_resized.convert("RGB")).astype(int)
@@ -165,8 +169,8 @@ Output: flat color mask, solid colors on pure black, same dimensions as input.""
     draw = ImageDraw.Draw(vis)
 
     # Label
-    label = f"Windows: {w_ratio:.1%} | Wall: {1-w_ratio:.1%}  (balconies excluded)"
-    draw.rectangle([5, 5, 520, 35], fill=(0, 0, 0))
+    label = f"Windows: {w_ratio:.1%} | Wall: {1-w_ratio:.1%}"
+    draw.rectangle([5, 5, 350, 35], fill=(0, 0, 0))
     draw.text((10, 10), label, fill=(255, 255, 255))
 
     result_path = os.path.join(output_dir, "result_oneshot.png")
